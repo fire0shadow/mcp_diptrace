@@ -67,6 +67,57 @@ def test_entry_argv_supports_python_and_frozen_modes(monkeypatch: pytest.MonkeyP
     ]
 
 
+def test_entry_argv_prefers_the_bundled_headless_gui_worker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression: the split Windows bundle cannot re-invoke the server binary.
+
+    ``diptrace_mcp_server.exe`` has no hidden worker subcommand, so frozen mode
+    must launch ``tools/diptrace_mcp_headless_gui/diptrace_mcp_headless_gui.exe``
+    instead of itself.
+    """
+
+    app = tmp_path / "app"
+    worker = app / "tools" / "diptrace_mcp_headless_gui" / "diptrace_mcp_headless_gui.exe"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("", encoding="utf-8")
+    server = app / "diptrace_mcp_server.exe"
+    server.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(server))
+    monkeypatch.delenv("DIPTRACE_MCP_HEADLESS_GUI", raising=False)
+
+    assert headless_gui._entry_argv("_probe", "--result", "x", frozen=True) == [
+        str(worker),
+        "_probe",
+        "--result",
+        "x",
+    ]
+
+
+def test_entry_argv_honours_the_headless_gui_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    override = tmp_path / "custom-worker.exe"
+    override.write_text("", encoding="utf-8")
+    server = tmp_path / "diptrace_mcp_server.exe"
+    server.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(server))
+    monkeypatch.setenv("DIPTRACE_MCP_HEADLESS_GUI", str(override))
+
+    assert headless_gui._entry_argv("_probe", frozen=True) == [str(override), "_probe"]
+
+
+def test_entry_argv_falls_back_to_the_running_binary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    server = tmp_path / "diptrace_mcp_server.exe"
+    server.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(server))
+    monkeypatch.delenv("DIPTRACE_MCP_HEADLESS_GUI", raising=False)
+
+    assert headless_gui._entry_argv("_probe", frozen=True) == [str(server), "_probe"]
+
+
 def test_roundtrip_result_json_roundtrip() -> None:
     result = RoundtripResult(
         ok=True,

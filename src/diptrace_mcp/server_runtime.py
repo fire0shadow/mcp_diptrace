@@ -56,6 +56,7 @@ from .server_inputs import (
     _finalize_tool_descriptions,
 )
 from .service import DipTraceService
+from .stdio_transport import write_payload
 from .synchronization import ComponentSyncMapping, SyncPlacement
 from .xml_document import XmlEdit
 
@@ -2928,11 +2929,16 @@ async def _robust_stdio_server() -> Any:
             await read_writer.aclose()
 
     async def forward_output() -> None:
+        # MCP stdio is UTF-8. ``sys.stdout`` uses the locale code page instead
+        # (cp1251 on Russian Windows), so any payload character outside that
+        # code page - for example the "Ω" in catalog component values - raises
+        # UnicodeEncodeError inside this task and takes the whole server down.
+        # ``write_payload`` writes the encoded bytes to the underlying buffer
+        # instead of encoding protocol output with a locale codec.
         async with write_reader:
             async for message in write_reader:
                 payload = message.message.model_dump_json(by_alias=True, exclude_none=True)
-                sys.stdout.write(payload + "\n")
-                sys.stdout.flush()
+                write_payload(payload)
 
     threading.Thread(target=read_stdin, name="diptrace-mcp-stdin", daemon=True).start()
     async with anyio.create_task_group() as task_group:
@@ -2946,7 +2952,21 @@ async def _run_stdio(server: FastMCP) -> None:
             write_stream,
             server._mcp_server.create_initialization_options(),
         )
+def _force_utf8_stdio() -> None:
+    """Make standard streams UTF-8 so logging/replies cannot hit a locale codec."""
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> None:
+    _force_utf8_stdio()
     parser = argparse.ArgumentParser(description="MCP server for DipTrace XML and live projects")
     parser.add_argument(
         "--version",

@@ -660,10 +660,44 @@ def _launch_on_current_desktop(
         raise
 
 
+def _frozen_worker_executable() -> Path | None:
+    """Return the executable that hosts the hidden ``_*`` worker subcommands.
+
+    A frozen build may be split into several executables: the Windows bundle
+    ships ``diptrace_mcp_server.exe`` (MCP server only) next to
+    ``tools/diptrace_mcp_headless_gui/diptrace_mcp_headless_gui.exe`` (the GUI
+    worker). Re-invoking the server binary with ``_library_export_worker``
+    therefore fails with an argparse error and no worker result. Prefer an
+    explicit override, then the sibling worker executable, and only then the
+    current binary (single-executable builds where both CLIs live together).
+    """
+
+    override = os.environ.get("DIPTRACE_MCP_HEADLESS_GUI")
+    if override:
+        return Path(override)
+
+    executable = Path(sys.executable)
+    if "headless_gui" in executable.stem.casefold():
+        return executable
+
+    candidates = (
+        executable.parent / "tools" / "diptrace_mcp_headless_gui" / "diptrace_mcp_headless_gui.exe",
+        executable.parent / "diptrace_mcp_headless_gui" / "diptrace_mcp_headless_gui.exe",
+        executable.parent / "diptrace_mcp_headless_gui.exe",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _entry_argv(subcommand: str, *args: str, frozen: bool | None = None) -> list[str]:
     if frozen is None:
         frozen = bool(sys.__dict__.get("frozen", False))
     if frozen:
+        worker = _frozen_worker_executable()
+        if worker is not None:
+            return [str(worker), subcommand, *args]
         return [sys.executable, subcommand, *args]
     return [sys.executable, "-m", "diptrace_mcp.headless_gui", subcommand, *args]
 
@@ -919,7 +953,8 @@ def export_component_library_xml(
                     raise HeadlessGuiError("headless DipTrace library export timed out")
         if not result_path.is_file():
             raise HeadlessGuiError(
-                f"library export worker exited with code {exit_code} without a result"
+                f"library export worker exited with code {exit_code} without a result "
+                f"(command: {argv[0]})"
             )
         result = _load_json(result_path)
     after = input_desktop_name()
@@ -998,7 +1033,8 @@ def run_native_roundtrip(request: RoundtripRequest) -> RoundtripResult:
                         raise HeadlessGuiError("headless DipTrace worker timed out")
         if not result_path.is_file():
             raise HeadlessGuiError(
-                f"headless worker exited with code {exit_code} without a result"
+                f"headless worker exited with code {exit_code} without a result "
+                f"(command: {argv[0]})"
             )
         result = RoundtripResult.from_json(_load_json(result_path))
 
