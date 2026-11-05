@@ -78,6 +78,15 @@ def test_unexpected_value_error_is_internal_not_user_error() -> None:
     assert "invariant details" not in json.dumps(result)
 
 
+def test_os_error_reports_errno_without_leaking_the_path() -> None:
+    result = exception_to_error_result(OSError(13, "Permission denied"))
+
+    assert result["error"]["code"] == "EXTERNAL_TOOL_ERROR"
+    assert result["error"]["details"]["errno"] == 13
+    assert result["error"]["details"]["strerror"] == "Permission denied"
+    assert "filename" not in result["error"]["details"]
+
+
 def test_async_tool_uses_the_same_contract() -> None:
     async def broken() -> None:
         raise AssertionError("invariant details")

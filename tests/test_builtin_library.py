@@ -112,6 +112,20 @@ def test_query_builtin_catalog_is_paginated_and_read_only(tmp_path: Path) -> Non
     assert hashlib.sha256(database.read_bytes()).hexdigest() == before
 
 
+def test_component_definition_resolves_by_name_when_catalog_index_is_stale() -> None:
+    source = _component_library()
+    target = DipTraceDocument.load(FIXTURES / "schematic.xml", 10_000_000)
+
+    # A library update can shift positions without touching the catalog row:
+    # the exported XML name is authoritative, the index is only a hint.
+    definitions = builtin._component_definitions(
+        source, target, {"library_index": 3, "name": "BSS138"}
+    )
+
+    assert definitions["name"] == "BSS138"
+    assert str(definitions["component_style"]).startswith("CompType")
+
+
 def test_builtin_component_definition_is_copied_only_into_schematic() -> None:
     source = _component_library()
     target = DipTraceDocument.load(FIXTURES / "schematic.xml", 10_000_000)

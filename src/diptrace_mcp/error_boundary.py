@@ -180,12 +180,20 @@ def exception_to_error_result(exc: BaseException) -> dict[str, Any]:
         }
 
     if isinstance(exc, OSError):
+        # Keep the redaction contract: never echo exc.filename or the message
+        # text, which can carry absolute paths. errno/strerror are enough to
+        # tell a permission problem from a missing file.
+        details: dict[str, Any] = {}
+        if exc.errno is not None:
+            details["errno"] = exc.errno
+        if exc.strerror:
+            details["strerror"] = exc.strerror
         return {
             "ok": False,
             "error": {
                 "code": "EXTERNAL_TOOL_ERROR",
                 "message": "A filesystem or external-tool operation failed.",
-                "details": {},
+                "details": details,
                 "retryable": True,
             },
         }

@@ -365,14 +365,47 @@ def _component_definitions(
     if target.kind != "schematic":
         raise DocumentError("Built-in components can be placed only in schematics")
     source_components = source.root.findall("./Components/Component")
+    expected_name = str(row["name"]).strip().casefold()
     index = int(row["library_index"])
-    if index >= len(source_components):
-        raise DocumentError("DipTrace catalog index is outside the exported library")
-    component = ET.fromstring(ET.tostring(source_components[index], encoding="unicode"))
+
+    # The SQLite catalog stores a library index, but the exported XML is the
+    # authority: a library update can shift positions without failing the
+    # catalog itself. Resolve by component name first and keep the index only as
+    # a hint, so a stale index cannot silently place the wrong symbol.
+    component = next(
+        (
+            item
+            for item in source_components
+            if (
+                (item.findtext("./Part[@Id='0']/Name") or item.findtext("./Part/Name") or "")
+                .strip()
+                .casefold()
+                == expected_name
+            )
+        ),
+        None,
+    )
+    if component is None:
+        if not 0 <= index < len(source_components):
+            raise DocumentError(
+                f"Built-in component {row['name']!r} is not in the exported library and "
+                f"the catalog index {index} is outside it ({len(source_components)} components)"
+            )
+        component = source_components[index]
+        fallback_part = component.find("./Part[@Id='0']")
+        if fallback_part is None:
+            fallback_part = component.find("./Part")
+        actual = (fallback_part.findtext("./Name") or "").strip() if fallback_part is not None else ""
+        if actual.casefold() != expected_name:
+            raise DocumentError(
+                f"DipTrace catalog entry does not match the exported component: "
+                f"expected {row['name']!r}, export has {actual!r} at index {index}"
+            )
+    component = ET.fromstring(ET.tostring(component, encoding="unicode"))
     part = component.find("./Part[@Id='0']")
     if part is None:
         part = component.find("./Part")
-    if part is None or (part.findtext("./Name") or "").casefold() != str(row["name"]).casefold():
+    if part is None or (part.findtext("./Name") or "").casefold() != expected_name:
         raise DocumentError("DipTrace catalog entry does not match the exported component")
 
     target_library = target.root.find("./Library[@Type='DipTrace-ComponentLibrary']")

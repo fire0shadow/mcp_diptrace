@@ -723,14 +723,20 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HeadlessGuiError(f"cannot create worker directory {path.parent}: {exc}") from exc
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        temporary.write_text(
-            json.dumps(dict(value), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
+        try:
+            temporary.write_text(
+                json.dumps(dict(value), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+        except OSError as exc:
+            raise HeadlessGuiError(f"cannot write worker JSON {path}: {exc}") from exc
     finally:
         temporary.unlink(missing_ok=True)
 
